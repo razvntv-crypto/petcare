@@ -1,6 +1,6 @@
 /* Petcare service worker: network-first, so new versions reach the phone right away.
    Falls back to the cached copy when offline. */
-const CACHE = "petcare-v2";
+const CACHE = "petcare-v3";
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

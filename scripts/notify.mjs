@@ -29,9 +29,9 @@ try {
 }
 
 const TZ = cfg.tz || "Europe/Bucharest";
-const parts = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+const parts = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
 const g = t => parts.find(p => p.type === t).value;
-const today = `${g("year")}-${g("month")}-${g("day")}`, hour = +g("hour");
+const today = `${g("year")}-${g("month")}-${g("day")}`, hour = +g("hour"), nowMin = hour * 60 + +g("minute");
 const last = fs.existsSync(LAST) ? fs.readFileSync(LAST, "utf8").trim() : "";
 console.log(`Local ${today} ${hour}:xx (${TZ}), alert hour ${cfg.hour}, last sent ${last || "never"}`);
 
@@ -49,28 +49,55 @@ const due = (cfg.items || [])
   .filter(({ n }) => alerts.includes(n) || (n < 0 && n >= -3))
   .sort((a, b) => a.n - b.n);
 
-let payload;
+// Daily meds: one push per dose time, unless it was already ticked in the app.
+// GitHub runs this every 15 minutes (sometimes a bit late), so a dose is sent up to 2 hours after its time.
+const MEDS = ".github/meds-sent";
+let medSent = [];
+try { const j = JSON.parse(fs.readFileSync(MEDS, "utf8")); if (j.d === today) medSent = j.k || []; } catch {}
+const toMin = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const medDue = [];
+for (const m of cfg.meds || []) {
+  if ((m.start && m.start > today) || (m.end && m.end < today)) continue;
+  const given = m.given && m.given.d === today ? m.given.t || [] : [];
+  for (const t of m.times || []) {
+    const k = `${m.id}|${t}`, late = nowMin - toMin(t);
+    if (late >= 0 && late <= 120 && !given.includes(t) && !medSent.includes(k)) medDue.push({ m, t, k });
+  }
+}
+
+const payloads = [];
+let careSent = false;
 if (test) {
   const next = (cfg.items || []).filter(it => !it.paused && it.d && diff(it.d) >= 0).sort((a, b) => a.d < b.d ? -1 : 1)[0];
-  payload = { title: "You're all set ✓", body: next ? "Next up: " + line(next, diff(next.d)) + " (" + fmtDate(next.d) + ")" : "Nothing coming up yet.", tag: "petcare-test" };
+  payloads.push({ title: "You're all set ✓", body: next ? "Next up: " + line(next, diff(next.d)) + " (" + fmtDate(next.d) + ")" : "Nothing coming up yet.", tag: "petcare-test" });
 } else {
-  if (hour < cfg.hour) { console.log("Not alert time yet."); process.exit(0); }
-  if (last === today) { console.log("Already sent today."); process.exit(0); }
-  if (!due.length) { console.log("Nothing due today, no notification."); process.exit(0); }
-  payload = due.length === 1
-    ? { title: `${due[0].it.pet} · ${due[0].it.n}`, body: what(due[0].it, due[0].n).replace(/^./, c => c.toUpperCase()) + " (" + fmtDate(due[0].it.d) + ")", tag: "petcare-" + today }
-    : { title: `${due.length} pet care reminders`, body: due.map(({ it, n }) => line(it, n)).join("\n"), tag: "petcare-" + today };
+  if (hour >= cfg.hour && last !== today && due.length) {
+    careSent = true;
+    payloads.push(due.length === 1
+      ? { title: `${due[0].it.pet} · ${due[0].it.n}`, body: what(due[0].it, due[0].n).replace(/^./, c => c.toUpperCase()) + " (" + fmtDate(due[0].it.d) + ")", tag: "petcare-" + today }
+      : { title: `${due.length} pet care reminders`, body: due.map(({ it, n }) => line(it, n)).join("\n"), tag: "petcare-" + today });
+  }
+  if (medDue.length) {
+    payloads.push(medDue.length === 1
+      ? { title: `${medDue[0].m.pet} · ${medDue[0].m.n}`, body: `Time for ${medDue[0].m.dose ? medDue[0].m.dose : "the dose"} (${medDue[0].t})`, tag: "petcare-med-" + medDue[0].k }
+      : { title: "Medication time", body: medDue.map(({ m, t }) => `${m.pet} · ${m.n}${m.dose ? " · " + m.dose : ""} (${t})`).join("\n"), tag: "petcare-med-" + today + nowMin });
+  }
+  if (!payloads.length) { console.log("Nothing to send right now."); process.exit(0); }
 }
 
 if (!cfg.sub || !cfg.vapid) { if (test) report(false, "Notifications are not turned on in the app."); console.log("Notifications are not turned on in the app yet."); process.exit(0); }
 webpush.setVapidDetails("mailto:noreply@petcare.app", cfg.vapid.pub, cfg.vapid.priv);
-try {
-  await webpush.sendNotification(cfg.sub, JSON.stringify(payload), { TTL: 6 * 3600, urgency: "high" });
-  console.log("Sent:", payload.title, "|", payload.body.replace(/\n/g, " / "));
-} catch (e) {
-  report(false, e.statusCode === 404 || e.statusCode === 410 ? "This phone's subscription expired. Turn notifications off and on again." : "Apple rejected the push (" + (e.statusCode || "") + " " + String(e.body || e.message).slice(0, 120) + ").");
-  if (e.statusCode === 404 || e.statusCode === 410) console.error("The phone's subscription expired. Open Petcare > Settings and turn notifications on again.");
-  else console.error("Push failed:", e.statusCode || "", e.body || e.message);
-  process.exit(1);
+for (const payload of payloads) {
+  try {
+    await webpush.sendNotification(cfg.sub, JSON.stringify(payload), { TTL: 3 * 3600, urgency: "high" });
+    console.log("Sent:", payload.title, "|", payload.body.replace(/\n/g, " / "));
+  } catch (e) {
+    report(false, e.statusCode === 404 || e.statusCode === 410 ? "This phone's subscription expired. Turn notifications off and on again." : "Apple rejected the push (" + (e.statusCode || "") + " " + String(e.body || e.message).slice(0, 120) + ").");
+    if (e.statusCode === 404 || e.statusCode === 410) console.error("The phone's subscription expired. Open Petcare > Settings and turn notifications on again.");
+    else console.error("Push failed:", e.statusCode || "", e.body || e.message);
+    process.exit(1);
+  }
 }
-if (!test) fs.writeFileSync(LAST, today + "\n"); else report(true, "Test notification sent.");
+if (test) report(true, "Test notification sent.");
+if (careSent) fs.writeFileSync(LAST, today + "\n");
+if (medDue.length) fs.writeFileSync(MEDS, JSON.stringify({ d: today, k: medSent.concat(medDue.map(x => x.k)) }) + "\n");

@@ -116,9 +116,9 @@ var PRE={cat:[['vac','Vaccine',1,'y'],['worm','Deworming (internal)',3,'m'],['fl
 var LT={vet:['Vet visit','vet'],sym:['Symptom','heart'],food:['Food','food'],meds:['Medication','pill'],note:['Note','note']};
 var UN={d:['day','days'],w:['week','weeks'],m:['month','months'],y:['year','years']};
 
-var S={pets:[],care:[],log:[],w:[],sel:null,theme:'auto',alerts:[3,1,0],hour:10,push:{}};
+var S={pets:[],care:[],log:[],w:[],meds:[],sel:null,theme:'auto',alerts:[3,1,0],hour:10,push:{}};
 try{var r0=localStorage.getItem('petcare');if(r0)S=Object.assign(S,JSON.parse(r0))}catch(e){}
-if(!S.push)S.push={};
+if(!S.push)S.push={};if(!S.meds)S.meds=[];
 var view='home',sh=null,exp=null,arm=null,wdraft='',tT;
 function saveRaw(){try{localStorage.setItem('petcare',JSON.stringify(S))}catch(e){toast('Storage is full. Use smaller photos.')}}
 function save(){saveRaw();if(S.push.on)queueSync()}
@@ -147,6 +147,8 @@ function cur(){var p=pet(S.sel);if(!p&&S.pets.length){p=S.pets[0];S.sel=p.id}ret
 function emo(p){return p&&p.sp==='dog'?'🐶':'🐱'}
 function avatar(p){return'<span class="av">'+(p&&p.photo?'<img src="'+p.photo+'" alt="">':emo(p))+'</span>'}
 function age(b){if(!b)return'';var d=pd(b),n=new Date(),m=(n.getFullYear()-d.getFullYear())*12+n.getMonth()-d.getMonth();if(n.getDate()<d.getDate())m--;if(m<0)return'';if(m<1){var dd=Math.max(0,Math.round((n-d)/864e5));return dd+(dd===1?' day':' days')}var y=Math.floor(m/12),mo=m%12;return(y?y+(y===1?' year':' years'):'')+(y&&mo?' ':'')+(mo?mo+' mo':'')}
+function medActive(m,d){return(!m.start||m.start<=d)&&(!m.end||m.end>=d)}
+function medsOf(pid){return S.meds.filter(function(m){return m.pet===pid})}
 function weights(pid){return S.w.filter(function(x){return x.pet===pid}).sort(function(a,b){return a.d<b.d?-1:a.d>b.d?1:a.t-b.t})}
 
 /* ---------- push notifications via GitHub Actions ---------- */
@@ -167,7 +169,8 @@ async function doSync(force){
  try{
   var sub=S.push.on?await curSub():null;
   var cfg={v:1,tz:'Europe/Bucharest',hour:S.hour,alerts:S.alerts,vapid:S.push.on?S.push.vapid:null,sub:sub,
-   items:S.care.map(function(c){var p=pet(c.pet);return{pet:p?p.name:'',n:c.n,t:c.t,d:c.next,paused:!p||!!c.paused}})};
+   items:S.care.map(function(c){var p=pet(c.pet);return{pet:p?p.name:'',n:c.n,t:c.t,d:c.next,paused:!p||!!c.paused}}),
+   meds:S.meds.filter(function(m){return pet(m.pet)&&medActive(m,today())}).map(function(m){return{id:m.id,pet:pet(m.pet).name,n:m.n,dose:m.dose||'',times:m.times,start:m.start,end:m.end||'',given:{d:today(),t:(m.given&&m.given[today()])||[]}}})};
   var plain=JSON.stringify(cfg),h=hsh(plain);
   if(!force&&h===S.push.h&&!S.push.err){syncing=false;return true}
   var key=await crypto.subtle.importKey('raw',ub64(pushKey()),'AES-GCM',false,['encrypt']);
@@ -248,6 +251,8 @@ function viewHome(){
  var ws=weights(p.id),lw=ws[ws.length-1],tags=[];
  if(p.breed)tags.push(esc(p.breed));tags.push(p.sex==='f'?'Female':p.sex==='m'?'Male':'');if(p.neut)tags.push(p.sex==='f'?'Spayed':'Neutered');
  h+='<div class="card"><div class="hero">'+avatar(p)+'<div style="flex:1;min-width:0"><h2>'+esc(p.name)+'</h2><p>'+[p.sp==='dog'?'Dog':'Cat',age(p.birth),lw?f1(lw.kg)+' kg':''].filter(Boolean).join(' · ')+'</p><div class="tags">'+tags.filter(Boolean).map(function(t){return'<span class="tag">'+t+'</span>'}).join('')+'</div></div><button class="ib" data-editpet="'+p.id+'" style="background:var(--field)" aria-label="Edit pet">'+ico('edit')+'</button></div></div>';
+ // meds
+ h+=viewMeds(p);
  // care
  var cs=S.care.filter(function(c){return c.pet===p.id}).sort(function(a,b){return a.next<b.next?-1:a.next>b.next?1:0});
  h+='<div class="sec"><h3>Care schedule</h3><button data-a="newcare">+ Add</button></div><div class="card" style="padding:4px 16px">';
@@ -280,6 +285,16 @@ function viewHome(){
  if(inf.length||p.notes){h+='<div class="sec"><h3>Info</h3></div><div class="card"><div class="info">'+inf.map(function(x){return'<div><span>'+x[0]+'</span><b>'+(x[0]==='Vet phone'?x[1]:esc(x[1]))+'</b></div>'}).join('')+'</div>'+(p.notes?'<div class="note" style="white-space:pre-wrap;margin-bottom:0">'+esc(p.notes)+'</div>':'')+'</div>'}
  return h}
 
+function viewMeds(p){
+ var ms=medsOf(p.id),td=today(),h='<div class="sec"><h3>Daily meds</h3><button data-a="newmed">+ Add</button></div>';
+ if(!ms.length)return h+'<div class="card" style="padding:12px 16px"><div class="note" style="margin:0">Pills or drops '+esc(p.name)+' takes every day, with a reminder at each time.</div></div>';
+ h+='<div class="card" style="padding:4px 16px">';
+ ms.sort(function(a,b){return(a.times[0]||'')<(b.times[0]||'')?-1:1}).forEach(function(m){
+  var act=medActive(m,td),g=(m.given&&m.given[td])||[],open=exp===m.id,left=m.end&&act?Math.round((pd(m.end)-pd(td))/864e5)+1:0;
+  h+='<div class="ci" data-xc="'+m.id+'" style="border-bottom:0;'+(act?'':'opacity:.55')+'"><span class="ic">'+ico('pill')+'</span><div class="t"><b>'+esc(m.n)+'</b><small>'+[m.dose,!act?(m.start>td?'Starts '+dshort(m.start):'Finished '+dshort(m.end)):m.end?(left===1?'Last day':left+' days left'):'Every day'].filter(Boolean).map(esc).join(' · ')+'</small></div>'+(act?'<div class="w'+(g.length>=m.times.length?'':' soon')+'">'+g.length+'/'+m.times.length+'<small>today</small></div>':'')+'</div>';
+  if(act)h+='<div class="chips" style="padding:0 0 12px 52px;border-bottom:1px solid var(--line)">'+m.times.map(function(t){var on=g.indexOf(t)>-1;return'<button class="c'+(on?' on':'')+'" data-give="'+m.id+'|'+t+'">'+(on?'✓ ':'')+t+'</button>'}).join('')+'</div>';
+  if(open)h+='<div class="acts" style="padding-top:10px"><button class="b" data-em="'+m.id+'">Edit</button><button class="b'+(arm===m.id?' arm':'')+'" data-dm="'+m.id+'">'+(arm===m.id?'Sure?':'Delete')+'</button></div>'});
+ return h+'</div>'}
 function viewSet(){
  var h='<div class="top"><button class="ib" data-a="back">'+ico('back')+'</button><h1>Settings</h1><span style="width:42px"></span></div>';
  h+='<div class="lab">Appearance</div><div class="chips">'+[['auto','Auto'],['light','Light'],['dark','Dark']].map(function(t){return'<button class="c'+(S.theme===t[0]?' on':'')+'" data-theme="'+t[0]+'">'+t[1]+'</button>'}).join('')+'</div>';
@@ -318,11 +333,19 @@ function sheetLog(){var e=sh.e,h='<div class="ov"><div class="sheet"><h4>'+(e.id
  h+='<div class="row2"><div><div class="lab">Date</div><input data-f="d" type="date" value="'+esc(e.d)+'"></div><div><div class="lab">Cost (lei, optional)</div><input data-f="cost" inputmode="decimal" value="'+esc(e.cost)+'"></div></div>';
  h+='<div class="lab">Details</div><textarea data-f="note" placeholder="Diagnosis, dose, weight at the vet…">'+esc(e.note)+'</textarea>';
  return h+'<button class="go" data-a="savelog">Save</button></div></div>'}
+function sheetMed(){var e=sh.e,h='<div class="ov"><div class="sheet"><h4>'+(e.id?'Edit medication':'New medication')+'<button class="ib" data-a="shx" style="background:var(--field)">'+ico('x')+'</button></h4>';
+ h+='<div class="row2" style="grid-template-columns:1.4fr 1fr"><div><div class="lab">Name</div><input data-f="n" value="'+esc(e.n)+'" placeholder="e.g. Metacam"></div><div><div class="lab">Dose</div><input data-f="dose" value="'+esc(e.dose)+'" placeholder="e.g. ½ pill"></div></div>';
+ h+='<div class="lab">Times a day (tap to add or remove)</div><div class="chips">'+['07:00','08:00','09:00','12:00','14:00','18:00','20:00','21:00','22:00'].concat(e.times.filter(function(t){return['07:00','08:00','09:00','12:00','14:00','18:00','20:00','21:00','22:00'].indexOf(t)<0})).sort().map(function(t){return'<button class="c'+(e.times.indexOf(t)>-1?' on':'')+'" data-mt="'+t+'">'+t+'</button>'}).join('')+'</div>';
+ h+='<div class="row2" style="margin-top:8px"><input id="mtc" type="time" value="13:30"><button class="b" data-a="mtadd" style="height:48px">Add this time</button></div>';
+ h+='<div class="lab">How long</div><div class="chips"><button class="c'+(!e.days?' on':'')+'" data-md="0">Ongoing</button>'+[5,7,10,14,30].map(function(n){return'<button class="c'+(String(e.days)===String(n)?' on':'')+'" data-md="'+n+'">'+n+' days</button>'}).join('')+'</div>';
+ h+='<div class="row2"><div><div class="lab">Start</div><input data-f="start" type="date" value="'+esc(e.start)+'"></div><div><div class="lab">Or exact days</div><input data-f="days" inputmode="numeric" value="'+esc(e.days||'')+'" placeholder="ongoing"></div></div>';
+ h+='<div class="note">'+(e.days>0?'Last dose on '+dlong(addI(e.start||today(),(+e.days)-1,'d'))+'.':'Repeats every day until you delete it.')+' A notification comes at each time unless you already ticked it.</div>';
+ return h+'<button class="go" data-a="savemed">Save</button></div></div>'}
 function sheetDone(){var c=sh.c,h='<div class="ov"><div class="sheet"><h4>'+esc(c.n)+'<button class="ib" data-a="shx" style="background:var(--field)">'+ico('x')+'</button></h4>';
  h+='<div class="lab">Done on</div><input data-f="d" type="date" value="'+esc(sh.e.d)+'" max="'+today()+'">';
  h+='<div class="row2"><div><div class="lab">Cost (lei, optional)</div><input data-f="cost" inputmode="decimal" value="'+esc(sh.e.cost)+'"></div><div><div class="lab">Note (optional)</div><input data-f="note" value="'+esc(sh.e.note)+'" placeholder="Product…"></div></div>';
  return h+'<div class="note">Next due: '+dlong(addI(sh.e.d||today(),c.en,c.eu))+'</div><button class="go" data-a="savedone">Mark as done</button></div></div>'}
-function showSheet(){document.getElementById('sheet').innerHTML=!sh?'':sh.type==='pet'?sheetPet():sh.type==='care'?sheetCare():sh.type==='log'?sheetLog():sheetDone()}
+function showSheet(){document.getElementById('sheet').innerHTML=!sh?'':sh.type==='pet'?sheetPet():sh.type==='care'?sheetCare():sh.type==='log'?sheetLog():sh.type==='med'?sheetMed():sheetDone()}
 function render(){setTimeout(function(){if(view==='set')loadStatus()},50);document.getElementById('app').innerHTML=view==='set'?viewSet():viewHome()}
 
 function newPet(sp){return{id:null,name:'',sp:sp||'cat',sex:'',neut:false,birth:'',breed:'',food:'',portion:'',chip:'',vet:'',vetph:'',notes:'',photo:''}}
@@ -337,6 +360,7 @@ document.addEventListener('input',function(e){var t=e.target;
  if(sh&&t.dataset.f){sh.e[t.dataset.f]=t.value;
   if(sh.type==='care'&&(t.dataset.f==='last'||t.dataset.f==='en')){var en=parseInt(sh.e.en,10);if(sh.e.last&&en>0){sh.e.next=addI(sh.e.last,en,sh.e.eu);var nx=document.querySelector('[data-f=next]');if(nx)nx.value=sh.e.next}}
   if(sh.type==='done'&&t.dataset.f==='d')showSheet()}});
+document.addEventListener('change',function(e){var t=e.target;if(sh&&sh.type==='med'&&(t.dataset.f==='days'||t.dataset.f==='start'))showSheet()});
 document.addEventListener('change',function(e){var t=e.target;if(t.id==='tk'){S.push.token=t.value.trim();S.push.err='';saveRaw();if(S.push.on)doSync(true);return}});
 function byId(arr,id){return arr.filter(function(x){return x.id===id})[0]}
 document.addEventListener('click',function(e){
@@ -346,7 +370,7 @@ document.addEventListener('click',function(e){
   if(e.target.classList&&e.target.classList.contains('ov')){sh=null;arm=null;showSheet();return}
   var r=e.target.closest('[data-xc],[data-xl]');if(r&&!sh){var id=r.dataset.xc||r.dataset.xl;exp=exp===id?null:id;arm=null;render()}return}
  var D=t.dataset;
- if(D.dc===undefined&&D.dl===undefined&&D.dw===undefined&&D.a!=='delpet')arm=null;
+ if(D.dc===undefined&&D.dl===undefined&&D.dw===undefined&&D.dm===undefined&&D.a!=='delpet')arm=null;
  if(D.pet){S.sel=D.pet;exp=null;saveRaw();render();fx(document.getElementById('app'));return}
  if(D.newpet){sh={type:'pet',e:newPet(D.newpet)};showSheet();return}
  if(D.editpet){var p0=pet(D.editpet);sh={type:'pet',e:Object.assign(newPet(),JSON.parse(JSON.stringify(p0)))};showSheet();return}
@@ -365,8 +389,19 @@ document.addEventListener('click',function(e){
  if(D.dc){if(arm===D.dc){S.care=S.care.filter(function(x){return x.id!==D.dc});arm=null;exp=null;save();toast('Deleted')}else arm=D.dc;render();return}
  if(D.el){var l0=byId(S.log,D.el);sh={type:'log',e:JSON.parse(JSON.stringify(l0))};if(!(sh.e.cost>0))sh.e.cost='';showSheet();return}
  if(D.dl){if(arm===D.dl){S.log=S.log.filter(function(x){return x.id!==D.dl});arm=null;exp=null;save();toast('Deleted')}else arm=D.dl;render();return}
+ if(D.give){var gp=D.give.split('|'),gm=byId(S.meds,gp[0]);if(gm){var td=today();gm.given=gm.given||{};var arr=gm.given[td]=gm.given[td]||[],ix2=arr.indexOf(gp[1]);if(ix2>-1)arr.splice(ix2,1);else arr.push(gp[1]);Object.keys(gm.given).forEach(function(k){if(k<addI(td,-30,'d'))delete gm.given[k]});save();render();if(ix2<0)toast('Given · '+gp[1])}return}
+ if(D.mt){var ti=sh.e.times.indexOf(D.mt);if(ti>-1)sh.e.times.splice(ti,1);else sh.e.times.push(D.mt);sh.e.times.sort();showSheet();return}
+ if(D.md!==undefined){sh.e.days=D.md==='0'?'':D.md;showSheet();return}
+ if(D.em){var m0=byId(S.meds,D.em);sh={type:'med',e:{id:m0.id,pet:m0.pet,n:m0.n,dose:m0.dose||'',times:m0.times.slice(),start:m0.start||today(),days:m0.end?String(Math.round((pd(m0.end)-pd(m0.start))/864e5)+1):''}};showSheet();return}
+ if(D.dm){if(arm===D.dm){S.meds=S.meds.filter(function(x){return x.id!==D.dm});arm=null;exp=null;save();toast('Deleted')}else arm=D.dm;render();return}
  if(D.dw){if(arm===D.dw){S.w=S.w.filter(function(x){return x.id!==D.dw});arm=null;save();toast('Deleted')}else arm=D.dw;render();return}
  switch(D.a){
+  case'newmed':{var pm=cur();sh={type:'med',e:{id:null,pet:pm.id,n:'',dose:'',times:['08:00'],start:today(),days:''}};showSheet();break}
+  case'mtadd':{var v=document.getElementById('mtc').value;if(v&&sh.e.times.indexOf(v)<0){sh.e.times.push(v);sh.e.times.sort()}showSheet();break}
+  case'savemed':{var e4=sh.e,nm4=(e4.n||'').trim();if(!nm4){toast('Add a name');return}if(!e4.times.length){toast('Pick at least one time');return}var dd=parseInt(e4.days,10),st=e4.start||today();
+   var rec3={pet:e4.pet,n:nm4,dose:(e4.dose||'').trim(),times:e4.times.slice().sort(),start:st,end:dd>0?addI(st,dd-1,'d'):''};
+   if(e4.id)Object.assign(byId(S.meds,e4.id),rec3);else{rec3.id=uid();rec3.given={};S.meds.push(rec3)}
+   sh=null;save();showSheet();render();toast('Saved');break}
   case'shx':sh=null;arm=null;showSheet();break;
   case'photo':document.getElementById('ph').click();break;
   case'nophoto':sh.e.photo='';showSheet();break;
@@ -374,7 +409,7 @@ document.addEventListener('click',function(e){
   case'savepet':{var e1=sh.e,nm=(e1.name||'').trim();if(!nm){toast('Add a name');return}e1.name=nm;
    if(e1.id){var o=pet(e1.id);Object.assign(o,e1)}else{e1.id=uid();S.pets.push(e1);S.sel=e1.id}
    sh=null;save();showSheet();render();toast('Saved');if(S.care.filter(function(x){return x.pet===S.sel}).length===0){setTimeout(function(){toast('Next: add the care schedule')},2500)}break}
-  case'delpet':{if(arm!=='pet'){arm='pet';showSheet();return}var id=sh.e.id;S.pets=S.pets.filter(function(x){return x.id!==id});S.care=S.care.filter(function(x){return x.pet!==id});S.log=S.log.filter(function(x){return x.pet!==id});S.w=S.w.filter(function(x){return x.pet!==id});S.sel=S.pets[0]?S.pets[0].id:null;sh=null;arm=null;save();showSheet();render();toast('Deleted');break}
+  case'delpet':{if(arm!=='pet'){arm='pet';showSheet();return}var id=sh.e.id;S.pets=S.pets.filter(function(x){return x.id!==id});S.care=S.care.filter(function(x){return x.pet!==id});S.log=S.log.filter(function(x){return x.pet!==id});S.w=S.w.filter(function(x){return x.pet!==id});S.meds=S.meds.filter(function(x){return x.pet!==id});S.sel=S.pets[0]?S.pets[0].id:null;sh=null;arm=null;save();showSheet();render();toast('Deleted');break}
   case'newcare':{var pc=cur();sh={type:'care',e:{id:null,pet:pc.id,n:'',t:'vac',en:'1',eu:'m',last:'',next:today(),note:''}};showSheet();break}
   case'savecare':{var e2=sh.e,nm2=(e2.n||'').trim(),en3=parseInt(e2.en,10);if(!nm2){toast('Add a name');return}if(!(en3>0)){toast('Set how often it repeats');return}if(!e2.next){toast('Pick the next due date');return}
    var rec={pet:e2.pet,n:nm2,t:e2.t,en:en3,eu:e2.eu,last:e2.last||'',next:e2.next,note:(e2.note||'').trim()};
@@ -395,9 +430,9 @@ document.addEventListener('click',function(e){
   case'tkcp':{var tk=S.push.token||'';try{navigator.clipboard.writeText(tk).then(function(){toast('Token copied')},function(){prompt('Copy this token',tk)})}catch(x){prompt('Copy this token',tk)}break}
   case'pon':pushOn();break;case'poff':pushOff();break;case'ptest':pushTest();break;
   case'psync':doSync(true).then(function(ok){toast(ok?'Synced':'Sync failed')});break;
-  case'bexp':document.getElementById('bk').value=JSON.stringify({pets:S.pets,care:S.care,log:S.log,w:S.w,alerts:S.alerts,hour:S.hour});break;
-  case'bcp':{var b=document.getElementById('bk');if(!b.value)b.value=JSON.stringify({pets:S.pets,care:S.care,log:S.log,w:S.w,alerts:S.alerts,hour:S.hour});b.select();try{navigator.clipboard.writeText(b.value)}catch(x){}toast('Copied');break}
-  case'bimp':try{var o2=JSON.parse(document.getElementById('bk').value);if(!o2||!Array.isArray(o2.pets))throw 0;S.pets=o2.pets;S.care=o2.care||[];S.log=o2.log||[];S.w=o2.w||[];if(Array.isArray(o2.alerts)&&o2.alerts.length)S.alerts=o2.alerts;if(o2.hour!=null)S.hour=+o2.hour;S.sel=S.pets[0]?S.pets[0].id:null;save();render();toast('Imported')}catch(x){toast('Invalid text, paste the full backup')}break;
+  case'bexp':document.getElementById('bk').value=JSON.stringify({pets:S.pets,care:S.care,log:S.log,w:S.w,meds:S.meds,alerts:S.alerts,hour:S.hour});break;
+  case'bcp':{var b=document.getElementById('bk');if(!b.value)b.value=JSON.stringify({pets:S.pets,care:S.care,log:S.log,w:S.w,meds:S.meds,alerts:S.alerts,hour:S.hour});b.select();try{navigator.clipboard.writeText(b.value)}catch(x){}toast('Copied');break}
+  case'bimp':try{var o2=JSON.parse(document.getElementById('bk').value);if(!o2||!Array.isArray(o2.pets))throw 0;S.pets=o2.pets;S.care=o2.care||[];S.log=o2.log||[];S.w=o2.w||[];S.meds=o2.meds||[];if(Array.isArray(o2.alerts)&&o2.alerts.length)S.alerts=o2.alerts;if(o2.hour!=null)S.hour=+o2.hour;S.sel=S.pets[0]?S.pets[0].id:null;save();render();toast('Imported')}catch(x){toast('Invalid text, paste the full backup')}break;
  }});
 
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault()},{passive:false})});
