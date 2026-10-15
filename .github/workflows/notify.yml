@@ -2,9 +2,9 @@ name: Pet care notifications
 
 on:
   schedule:
-    # Runs every hour from about 6:00 to 23:00 Romanian time. The script itself decides:
-    # it sends once a day, at the alert time set in the app, and only if something is due.
-    - cron: "17 3-21 * * *"
+    # Every 15 minutes from about 6:00 to 24:00 Romanian time. The script decides what to send:
+    # care reminders once a day at the chosen hour, and each daily med dose at its time.
+    - cron: "2,17,32,47 3-21 * * *"
   workflow_dispatch:
     inputs:
       test:
@@ -37,7 +37,7 @@ jobs:
       - name: Record sent day
         if: always()
         run: |
-          if [ -n "$(git status --porcelain .github/last-sent .github/status)" ]; then
+          if [ -n "$(git status --porcelain .github)" ]; then
             git config user.name "petcare-bot"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A .github
