@@ -198,15 +198,19 @@ async function pushOn(){
 async function pushOff(){try{var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe()}catch(e){}S.push.on=false;saveRaw();await doSync(true);render();toast('Notifications are off')}
 async function pushTest(){var ok=await doSync(true);if(!ok){toast('Sync failed, see Settings');return}
  var r=await gh('/actions/workflows/notify.yml/dispatches',{method:'POST',body:JSON.stringify({ref:'main',inputs:{test:true}})});
- toast(r.status===204?'Test sent, arrives in about a minute':r.status===403||r.status===404?'Token needs Actions: Read and write for the test':'Could not start the test ('+r.status+')')}
+ if(r.status===204){var t0=Date.now(),tries=0;(function poll(){setTimeout(function(){readStatus().then(function(st){if(st&&Date.parse(st.at)>t0-5000&&st.test!==false){showStatus(st);toast(st.ok?'Test sent':'Test failed, see Settings');stLoaded=Date.now()}else if(st&&Date.parse(st.at)>t0-5000&&!st.ok){showStatus(st);toast('Test failed, see Settings')}else if(++tries<10)poll();else toast('No answer from GitHub yet, check the Actions tab')})},20000)})()}
+ toast(r.status===204?'Test started, arrives in about a minute':r.status===403||r.status===404?'Token needs Actions: Read and write for the test':'Could not start the test ('+r.status+')')}
 function alertTxt(){var a=S.alerts.slice().sort(function(x,y){return y-x}),b=a.filter(function(x){return x>0}).map(function(x){return x===1?'1 day':x+' days'}),t=b.length?(b.length>1?b.slice(0,-1).join(', ')+' and '+b[b.length-1]:b[0])+' before':'';if(a.indexOf(0)>-1)t+=(t?' and ':'')+'on the day';return t}
+async function readStatus(){try{var r=await gh('/contents/.github/status?t='+Date.now());if(!r.ok)return null;var j=await r.json();return JSON.parse(atob(j.content.replace(/\s/g,'')))}catch(e){return null}}
+function showStatus(st){var el=document.getElementById('pst');if(!el||!st)return;el.innerHTML='Last check '+timeAgo(Date.parse(st.at))+': <span style="color:'+(st.ok?'var(--ink)':'var(--bad)')+'">'+esc(st.msg)+'</span>'}
+var stLoaded=0;function loadStatus(){if(!S.push.on||!S.push.token||Date.now()-stLoaded<20000)return;stLoaded=Date.now();readStatus().then(showStatus)}
 function timeAgo(t){var m=Math.round((Date.now()-t)/6e4);return m<1?'just now':m<60?m+' min ago':new Date(t).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
 function viewPush(){
  var P_=S.push,h='<div class="lab">Notifications</div>';
  if(P_.on){
   h+='<div class="card" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-weight:600">On</b><span class="note" style="margin:0">'+(P_.err?'<span style="color:var(--bad)">Not synced</span>':P_.synced?'Synced '+timeAgo(P_.synced):'')+'</span></div>'
    +(P_.err?'<div class="note" style="color:var(--bad)">'+esc(P_.err)+'</div>':'<div class="note">One notification at '+pad(S.hour)+':00, '+alertTxt()+', plus up to 3 days after a missed one.</div>')
-   +'<div class="chips" style="margin-top:10px"><button class="b" data-a="ptest">Send test</button><button class="b" data-a="psync">Sync now</button><button class="b" data-a="poff">Turn off</button></div></div>'
+   +'<div class="note" id="pst" style="margin-bottom:0"></div><div class="chips" style="margin-top:10px"><button class="b" data-a="ptest">Send test</button><button class="b" data-a="psync">Sync now</button><button class="b" data-a="poff">Turn off</button></div></div>'
    +'<div class="lab">GitHub token</div><input id="tk" type="password" autocomplete="off" placeholder="github_pat_…" value="'+esc(P_.token||'')+'">'+(P_.token?'<button class="b" data-a="tkcp" style="width:100%;margin-top:8px">Copy token (to use it in another app)</button>':'');
   return h}
  h+='<div class="card" style="padding:14px 16px"><div class="note" style="margin-top:0;color:var(--ink);font-size:13.5px">Push notifications on the days your pets\' care is due, even when the app is closed. One-time setup:</div>'
@@ -319,7 +323,7 @@ function sheetDone(){var c=sh.c,h='<div class="ov"><div class="sheet"><h4>'+esc(
  h+='<div class="row2"><div><div class="lab">Cost (lei, optional)</div><input data-f="cost" inputmode="decimal" value="'+esc(sh.e.cost)+'"></div><div><div class="lab">Note (optional)</div><input data-f="note" value="'+esc(sh.e.note)+'" placeholder="Product…"></div></div>';
  return h+'<div class="note">Next due: '+dlong(addI(sh.e.d||today(),c.en,c.eu))+'</div><button class="go" data-a="savedone">Mark as done</button></div></div>'}
 function showSheet(){document.getElementById('sheet').innerHTML=!sh?'':sh.type==='pet'?sheetPet():sh.type==='care'?sheetCare():sh.type==='log'?sheetLog():sheetDone()}
-function render(){document.getElementById('app').innerHTML=view==='set'?viewSet():viewHome()}
+function render(){setTimeout(function(){if(view==='set')loadStatus()},50);document.getElementById('app').innerHTML=view==='set'?viewSet():viewHome()}
 
 function newPet(sp){return{id:null,name:'',sp:sp||'cat',sex:'',neut:false,birth:'',breed:'',food:'',portion:'',chip:'',vet:'',vetph:'',notes:'',photo:''}}
 function markDone(c,d,cost,note){c.last=d;c.next=addI(d,c.en,c.eu);S.log.push({id:uid(),pet:c.pet,kind:'care',ref:c.id,n:c.n,d:d,cost:cost>0?cost:0,note:note||'',t:Date.now()})}

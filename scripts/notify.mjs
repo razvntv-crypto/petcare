@@ -9,9 +9,11 @@ import { webcrypto as wc } from "node:crypto";
 const { PETCARE_KEY, TEST } = process.env;
 const LAST = ".github/last-sent";
 const test = TEST === "true";
+// Leaves a short, non-secret status note the app can show (only for tests and errors).
+const report = (ok, msg) => { try { fs.writeFileSync(".github/status", JSON.stringify({ at: new Date().toISOString(), ok, test, msg }) + "\n"); } catch {} };
 
 if (!fs.existsSync("schedule.enc")) { console.log("No schedule yet: turn on notifications in the app first."); process.exit(0); }
-if (!PETCARE_KEY) { console.log("PETCARE_KEY secret is missing: copy it from the app (Settings > Notifications) into Settings > Secrets and variables > Actions."); process.exit(0); }
+if (!PETCARE_KEY) { report(false, "The PETCARE_KEY secret is missing on GitHub."); console.log("PETCARE_KEY secret is missing: copy it from the app (Settings > Notifications) into Settings > Secrets and variables > Actions."); process.exit(0); }
 
 const b64 = s => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 let cfg;
@@ -21,6 +23,7 @@ try {
   const plain = await wc.subtle.decrypt({ name: "AES-GCM", iv: b64(box.iv) }, key, b64(box.ct));
   cfg = JSON.parse(Buffer.from(plain).toString("utf8"));
 } catch (e) {
+  report(false, "The PETCARE_KEY secret on GitHub doesn't match this app's key. Copy the key again and update the secret.");
   console.error("Could not read schedule.enc. The PETCARE_KEY secret probably doesn't match the key in the app; copy it again.");
   process.exit(1);
 }
@@ -59,14 +62,15 @@ if (test) {
     : { title: `${due.length} pet care reminders`, body: due.map(({ it, n }) => line(it, n)).join("\n"), tag: "petcare-" + today };
 }
 
-if (!cfg.sub || !cfg.vapid) { console.log("Notifications are not turned on in the app yet."); process.exit(0); }
+if (!cfg.sub || !cfg.vapid) { if (test) report(false, "Notifications are not turned on in the app."); console.log("Notifications are not turned on in the app yet."); process.exit(0); }
 webpush.setVapidDetails("mailto:noreply@petcare.app", cfg.vapid.pub, cfg.vapid.priv);
 try {
   await webpush.sendNotification(cfg.sub, JSON.stringify(payload), { TTL: 6 * 3600, urgency: "high" });
   console.log("Sent:", payload.title, "|", payload.body.replace(/\n/g, " / "));
 } catch (e) {
+  report(false, e.statusCode === 404 || e.statusCode === 410 ? "This phone's subscription expired. Turn notifications off and on again." : "Apple rejected the push (" + (e.statusCode || "") + " " + String(e.body || e.message).slice(0, 120) + ").");
   if (e.statusCode === 404 || e.statusCode === 410) console.error("The phone's subscription expired. Open Petcare > Settings and turn notifications on again.");
   else console.error("Push failed:", e.statusCode || "", e.body || e.message);
   process.exit(1);
 }
-if (!test) fs.writeFileSync(LAST, today + "\n");
+if (!test) fs.writeFileSync(LAST, today + "\n"); else report(true, "Test notification sent.");
