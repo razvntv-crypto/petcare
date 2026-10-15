@@ -207,7 +207,7 @@ function viewPush(){
   h+='<div class="card" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-weight:600">On</b><span class="note" style="margin:0">'+(P_.err?'<span style="color:var(--bad)">Not synced</span>':P_.synced?'Synced '+timeAgo(P_.synced):'')+'</span></div>'
    +(P_.err?'<div class="note" style="color:var(--bad)">'+esc(P_.err)+'</div>':'<div class="note">One notification at '+pad(S.hour)+':00, '+alertTxt()+', plus up to 3 days after a missed one.</div>')
    +'<div class="chips" style="margin-top:10px"><button class="b" data-a="ptest">Send test</button><button class="b" data-a="psync">Sync now</button><button class="b" data-a="poff">Turn off</button></div></div>'
-   +'<div class="lab">GitHub token</div><input id="tk" type="password" autocomplete="off" placeholder="github_pat_…" value="'+esc(P_.token||'')+'">';
+   +'<div class="lab">GitHub token</div><input id="tk" type="password" autocomplete="off" placeholder="github_pat_…" value="'+esc(P_.token||'')+'">'+(P_.token?'<button class="b" data-a="tkcp" style="width:100%;margin-top:8px">Copy token (to use it in another app)</button>':'');
   return h}
  h+='<div class="card" style="padding:14px 16px"><div class="note" style="margin-top:0;color:var(--ink);font-size:13.5px">Push notifications on the days your pets\' care is due, even when the app is closed. One-time setup:</div>'
  +'<div class="note"><b>1.</b> Copy this key and add it on GitHub: <b>'+REPO.split('/')[1]+'</b> repo → Settings → Secrets and variables → Actions → New repository secret. Name: <b>PETCARE_KEY</b>.</div>'
@@ -388,6 +388,7 @@ document.addEventListener('click',function(e){
   case'set':view='set';render();fx(document.getElementById('app'));window.scrollTo(0,0);break;
   case'back':view='home';render();fx(document.getElementById('app'));break;
   case'pkey':{var k=pushKey();try{navigator.clipboard.writeText(k).then(function(){toast('Key copied')},function(){prompt('Copy this key',k)})}catch(x){prompt('Copy this key',k)}break}
+  case'tkcp':{var tk=S.push.token||'';try{navigator.clipboard.writeText(tk).then(function(){toast('Token copied')},function(){prompt('Copy this token',tk)})}catch(x){prompt('Copy this token',tk)}break}
   case'pon':pushOn();break;case'poff':pushOff();break;case'ptest':pushTest();break;
   case'psync':doSync(true).then(function(ok){toast(ok?'Synced':'Sync failed')});break;
   case'bexp':document.getElementById('bk').value=JSON.stringify({pets:S.pets,care:S.care,log:S.log,w:S.w,alerts:S.alerts,hour:S.hour});break;
