@@ -40,7 +40,7 @@ jobs:
           if [ -n "$(git status --porcelain .github/last-sent .github/status)" ]; then
             git config user.name "petcare-bot"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/last-sent .github/status 2>/dev/null; git add -A .github
+            git add -A .github
             git commit -m "Notification status"
             git pull -q --rebase && git push
           fi
