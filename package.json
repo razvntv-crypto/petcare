@@ -1,0 +1,9 @@
+{
+  "name": "petcare",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "web-push": "3.6.7"
+  }
+}

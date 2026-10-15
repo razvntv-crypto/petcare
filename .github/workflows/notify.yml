@@ -1,0 +1,59 @@
+name: Pet care notifications
+
+on:
+  schedule:
+    # Runs every hour from about 6:00 to 23:00 Romanian time. The script itself decides:
+    # it sends once a day, at the alert time set in the app, and only if something is due.
+    - cron: "17 3-21 * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Send a test notification now"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency: notify
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - run: node scripts/notify.mjs
+        env:
+          PETCARE_KEY: ${{ secrets.PETCARE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TEST: ${{ github.event.inputs.test }}
+      # Remember the day a notification went out, so it is sent only once a day.
+      - name: Record sent day
+        run: |
+          if [ -n "$(git status --porcelain .github/last-sent)" ]; then
+            git config user.name "petcare-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/last-sent
+            git commit -m "Notification sent"
+            git pull -q --rebase && git push
+          fi
+      # GitHub pauses scheduled workflows in repos with no commits for 60 days.
+      # This makes a tiny commit every ~45 quiet days so the notifications keep running.
+      - name: Keep the schedule alive
+        run: |
+          git pull -q --ff-only || true
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 45 * 86400 )) ]; then
+            date -u +%FT%TZ > .github/keepalive
+            git config user.name "petcare-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/keepalive
+            git commit -m "Keep notification schedule active"
+            git push
+          fi
