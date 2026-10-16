@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: "Send a test notification now"
+        description: "Send a test notification instead of the normal check"
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
