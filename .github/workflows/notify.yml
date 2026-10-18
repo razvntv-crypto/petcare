@@ -2,9 +2,12 @@ name: Pet care notifications
 
 on:
   schedule:
-    # Every 15 minutes from about 6:00 to 24:00 Romanian time. The script decides what to send:
-    # care reminders once a day at the chosen hour, and each daily med dose at its time.
-    - cron: "2,17,32,47 3-21 * * *"
+    # GitHub often skips scheduled runs, so around the 11:00 dose (Romanian time, summer and
+    # winter) it is asked every 5 minutes: if most attempts are dropped, one still gets through.
+    # The script sends each dose only once, so extra runs never cause duplicates.
+    - cron: "*/5 8-10 * * *"
+    # Hourly through the day for care reminders and any other dose times.
+    - cron: "17 3-21 * * *"
   workflow_dispatch:
     inputs:
       test:
