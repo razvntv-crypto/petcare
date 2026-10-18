@@ -50,7 +50,7 @@ const due = (cfg.items || [])
   .sort((a, b) => a.n - b.n);
 
 // Daily meds: one push per dose time, unless it was already ticked in the app.
-// GitHub runs this every 15 minutes (sometimes a bit late), so a dose is sent up to 2 hours after its time.
+// A dose is still sent up to 4 hours after its time if the check runs late (GitHub's own schedule often does).
 const MEDS = ".github/meds-sent";
 let medSent = [];
 try { const j = JSON.parse(fs.readFileSync(MEDS, "utf8")); if (j.d === today) medSent = j.k || []; } catch {}
@@ -61,7 +61,7 @@ for (const m of cfg.meds || []) {
   const given = m.given && m.given.d === today ? m.given.t || [] : [];
   for (const t of m.times || []) {
     const k = `${m.id}|${t}`, late = nowMin - toMin(t);
-    if (late >= 0 && late <= 120 && !given.includes(t) && !medSent.includes(k)) medDue.push({ m, t, k });
+    if (late >= 0 && late <= 240 && !given.includes(t) && !medSent.includes(k)) medDue.push({ m, t, k });
   }
 }
 
@@ -69,7 +69,10 @@ const payloads = [];
 let careSent = false;
 if (test) {
   const next = (cfg.items || []).filter(it => !it.paused && it.d && diff(it.d) >= 0).sort((a, b) => a.d < b.d ? -1 : 1)[0];
-  payloads.push({ title: "You're all set ✓", body: next ? "Next up: " + line(next, diff(next.d)) + " (" + fmtDate(next.d) + ")" : "Nothing coming up yet.", tag: "petcare-test" });
+  const meds = (cfg.meds || []).filter(m => !(m.end && m.end < today));
+  const medTxt = meds.length ? meds.map(m => `${m.pet} · ${m.n} at ${(m.times || []).join(", ")}`).join("\n") : "";
+  const careTxt = next ? "Next care: " + line(next, diff(next.d)) + " (" + fmtDate(next.d) + ")" : "";
+  payloads.push({ title: "You're all set ✓", body: [medTxt ? "Daily meds:\n" + medTxt : "", careTxt].filter(Boolean).join("\n") || "Nothing scheduled yet.", tag: "petcare-test" });
 } else {
   if (hour >= cfg.hour && last !== today && due.length) {
     careSent = true;
